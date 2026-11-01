@@ -1,10 +1,31 @@
 <p align="center"><a href="https://kitsunetechnologies.org/work"><img src="https://raw.githubusercontent.com/KitsuneTech1/.github/main/assets/kitsune-banner.svg" alt="Built by Kitsune Technologies" width="760"></a></p>
 
-# ranking-cli
+# Rankline
 
-ranking-cli ranks options on several weighted criteria from a CSV or JSON file. It is deterministic, uses no model calls, and keeps the scoring inputs human-readable.
+Deterministic weighted-criteria ranking from CSV or JSON, with human-readable and auditable scores.
 
-Use it to score and rank anything: candidates, tools, features, vendors, or decisions.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+
+Score and rank anything: candidates, tools, features, vendors, or decisions. No models, no randomness. All weights are human-readable.
+
+## Quick Start
+
+Clone the repo and try the demo:
+
+```bash
+git clone https://github.com/KitsuneTech1/ranking-cli.git
+cd ranking-cli
+python demo.py
+```
+
+To rank your own options from a CSV file:
+
+```bash
+python ranking_cli.py options.csv --weights "speed:3,cost:1,reliability:2"
+```
+
+See the CSV format example below.
 
 ## Features
 
@@ -20,13 +41,6 @@ Use it to score and rank anything: candidates, tools, features, vendors, or deci
 
 - Python 3.8 or higher
 - Standard library only (no external packages)
-
-## Installation
-
-```bash
-git clone https://github.com/KitsuneTech1/ranking-cli.git
-cd ranking-cli
-```
 
 ## CSV Format
 
