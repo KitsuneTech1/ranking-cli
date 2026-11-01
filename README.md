@@ -90,6 +90,11 @@ print(format_results(ranked))
 ```python
 from ahp import rank_with_ahp
 
+options = [
+    {"name": "Option A", "speed": 0.9, "cost": 0.5},
+    {"name": "Option B", "speed": 0.7, "cost": 0.8},
+]
+
 ranked, consistency_ratio = rank_with_ahp(
     options,
     ["speed", "cost"],

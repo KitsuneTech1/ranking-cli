@@ -202,7 +202,7 @@ def format_detailed_results(
             contribution = criterion_score * weight
             lines.append(f"   {criterion:20} {criterion_score:6.2f} * {weight:6.4f} = {contribution:6.4f}")
 
-        lines.append()
+        lines.append("")
 
     return "\n".join(lines)
 
