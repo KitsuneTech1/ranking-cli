@@ -5,6 +5,8 @@ Tests ranking calculations, file loading, and CLI argument parsing.
 
 import json
 import math
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -248,6 +250,56 @@ Option C,0.8,0.6,0.7"""
         self.assertIn("Option A", output)
         self.assertIn("Option B", output)
         self.assertIn("0.85", output)
+
+    def test_format_detailed_results(self):
+        ranked = [
+            ("Option A", 0.85, {"speed": 0.9, "cost": 0.8}),
+        ]
+
+        output = rc.format_detailed_results(ranked, {"speed": 2, "cost": 1})
+
+        self.assertIn("Detailed Ranking Results", output)
+        self.assertIn("Option A", output)
+        self.assertIn("speed", output)
+
+    def test_cli_runs_documented_csv_workflow(self):
+        csv_content = "name,speed,cost\nOption A,0.9,0.5\nOption B,0.7,0.8\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(csv_content)
+            temp_path = f.name
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve().parents[1] / "ranking_cli.py"),
+                    temp_path,
+                    "--weights",
+                    "speed:2,cost:1",
+                    "--format",
+                    "detailed",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Detailed Ranking Results", result.stdout)
+            self.assertIn("Option A", result.stdout)
+        finally:
+            Path(temp_path).unlink()
+
+    def test_demo_runs_to_completion(self):
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve().parents[1] / "demo.py")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Ranking Results", result.stdout)
+        self.assertIn("Detailed Ranking Results", result.stdout)
 
     def test_cli_argument_parsing(self):
         """Test CLI argument parsing."""
