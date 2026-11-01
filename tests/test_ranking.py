@@ -4,11 +4,13 @@ Tests ranking calculations, file loading, and CLI argument parsing.
 """
 
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
 
 import ranking_cli as rc
+import ahp
 
 
 class TestRankingCLI(unittest.TestCase):
@@ -32,6 +34,12 @@ class TestRankingCLI(unittest.TestCase):
         self.assertAlmostEqual(normalized["a"], 1/3)
         self.assertAlmostEqual(normalized["b"], 1/3)
         self.assertAlmostEqual(normalized["c"], 1/3)
+
+    def test_normalize_weights_rejects_empty_negative_and_non_finite(self):
+        for weights in ({}, {"a": -1}, {"a": math.inf}):
+            with self.subTest(weights=weights):
+                with self.assertRaises(ValueError):
+                    rc.normalize_weights(weights)
 
     def test_score_option(self):
         """Test option scoring."""
@@ -89,6 +97,11 @@ class TestRankingCLI(unittest.TestCase):
         self.assertEqual(ranked[0][0], "B")  # B has lowest score
         self.assertEqual(ranked[-1][0], "A")  # A has highest score
 
+    def test_rank_options_uses_row_index_for_missing_names(self):
+        ranked = rc.rank_options([{"score": 0.2}, {"score": 0.8}], {"score": 1})
+
+        self.assertEqual([row[0] for row in ranked], ["1", "0"])
+
     def test_load_csv(self):
         """Test loading CSV file."""
         csv_content = """name,speed,cost,reliability
@@ -114,6 +127,21 @@ Option C,0.8,0.6,0.7"""
                 os.unlink(temp_path)
             except:
                 pass
+
+    def test_load_csv_rejects_invalid_values_and_missing_name_column(self):
+        invalid_csv = "name,score\nOption A,not-a-number\n"
+        missing_name_csv = "score\n0.5\n"
+
+        for csv_content in (invalid_csv, missing_name_csv):
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+                f.write(csv_content)
+                temp_path = f.name
+
+            try:
+                with self.assertRaises(ValueError):
+                    rc.load_csv(temp_path)
+            finally:
+                Path(temp_path).unlink()
 
     def test_load_json(self):
         """Test loading JSON file."""
@@ -143,6 +171,37 @@ Option C,0.8,0.6,0.7"""
             except:
                 pass
 
+    def test_load_json_discovers_all_criteria_and_normalizes_numbers(self):
+        json_content = {
+            "options": [
+                {"name": "X", "speed": 0.8},
+                {"name": "Y", "cost": 0.6},
+            ]
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(json_content, f)
+            temp_path = f.name
+
+        try:
+            options, criteria = rc.load_json(temp_path)
+            self.assertEqual(criteria, ["speed", "cost"])
+            self.assertIsInstance(options[0]["speed"], float)
+        finally:
+            Path(temp_path).unlink()
+
+    def test_load_json_rejects_non_numeric_or_out_of_range_values(self):
+        for value in ("0.5", 1.1, True):
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+                json.dump({"options": [{"name": "X", "score": value}]}, f)
+                temp_path = f.name
+
+            try:
+                with self.assertRaises(ValueError):
+                    rc.load_json(temp_path)
+            finally:
+                Path(temp_path).unlink()
+
     def test_parse_weights(self):
         """Test weight string parsing."""
         weights_str = "speed:3,cost:2,reliability:5"
@@ -170,6 +229,12 @@ Option C,0.8,0.6,0.7"""
         with self.assertRaises(ValueError):
             rc.parse_weights("speed:abc")
 
+    def test_parse_weights_rejects_empty_duplicate_and_negative_entries(self):
+        for value in ("speed:", ":1", "speed:1,speed:2", "speed:-1", "speed:inf"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    rc.parse_weights(value)
+
     def test_format_results(self):
         """Test result formatting."""
         ranked = [
@@ -195,6 +260,31 @@ Option C,0.8,0.6,0.7"""
         self.assertEqual(args.input, "options.csv")
         self.assertEqual(args.weights, "speed:2,cost:1")
         self.assertEqual(args.format, "detailed")
+
+    def test_ahp_weights_and_ranking(self):
+        weights, consistency = ahp.pairwise_weights([
+            [1, 3],
+            [1 / 3, 1],
+        ])
+        self.assertAlmostEqual(sum(weights), 1.0)
+        self.assertGreater(weights[0], weights[1])
+        self.assertEqual(consistency, 0.0)
+
+        ranked, consistency = ahp.rank_with_ahp(
+            [{"name": "A", "speed": 1.0, "cost": 0.2},
+             {"name": "B", "speed": 0.4, "cost": 0.9}],
+            ["speed", "cost"],
+            [[1, 3], [1 / 3, 1]],
+        )
+        self.assertEqual(ranked[0][0], "A")
+        self.assertEqual(consistency, 0.0)
+
+    def test_ahp_rejects_non_reciprocal_matrix(self):
+        with self.assertRaises(ValueError):
+            ahp.pairwise_weights([[1, 2], [2, 1]])
+
+        with self.assertRaises(ValueError):
+            ahp.pairwise_weights([[1, "2"], [0.5, 1]])
 
 
 if __name__ == "__main__":
