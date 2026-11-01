@@ -102,7 +102,7 @@ ranked, consistency_ratio = rank_with_ahp(
 )
 ```
 
-The function returns the ranking and the AHP consistency ratio. A ratio near zero is ideal. The command-line interface remains focused on CSV or JSON weighted-sum ranking.
+The function returns the ranking and the AHP consistency ratio. A ratio near zero is ideal. Consistency ratios are supported for matrices up to 15 by 15. The command-line interface remains focused on CSV or JSON weighted-sum ranking.
 
 ## Example
 

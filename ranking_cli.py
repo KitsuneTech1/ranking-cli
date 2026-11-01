@@ -24,6 +24,9 @@ def _validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
     for criterion, weight in weights.items():
         if not isinstance(criterion, str) or not criterion.strip():
             raise ValueError("Weight criteria must be non-empty names")
+        criterion = criterion.strip()
+        if criterion in clean:
+            raise ValueError(f"Duplicate weight criterion: {criterion}")
         if isinstance(weight, bool):
             raise ValueError(f"Weight must be a finite non-negative number: {weight}")
         try:
@@ -32,7 +35,7 @@ def _validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
             raise ValueError(f"Weight must be a number: {weight}")
         if not math.isfinite(numeric_weight) or numeric_weight < 0:
             raise ValueError(f"Weight must be a finite non-negative number: {weight}")
-        clean[criterion.strip()] = numeric_weight
+        clean[criterion] = numeric_weight
     return clean
 
 
@@ -51,7 +54,9 @@ def normalize_weights(weights: Dict[str, float]) -> Dict[str, float]:
     total = sum(weights.values())
     if total == 0:
         return {k: 1.0 / len(weights) for k in weights}
-    return {k: v / total for k, v in weights.items()}
+    largest = max(weights.values())
+    scaled_total = sum(value / largest for value in weights.values())
+    return {k: (value / largest) / scaled_total for k, value in weights.items()}
 
 
 def score_option(option: Dict[str, float], weights: Dict[str, float]) -> float:
@@ -59,7 +64,7 @@ def score_option(option: Dict[str, float], weights: Dict[str, float]) -> float:
     Calculate weighted score for an option.
     Each criterion should be a value between 0 and 1.
     """
-    weights = _validate_weights(weights)
+    weights = normalize_weights(weights)
     score = 0.0
     weight_sum = 0.0
 
@@ -83,6 +88,7 @@ def rank_options(
     Rank options by weighted score.
     Returns list of (option_name, score, scores_by_criterion) tuples.
     """
+    weights = _validate_weights(weights)
     normalized_weights = normalize_weights(weights)
 
     ranked = []
@@ -112,12 +118,25 @@ def load_csv(path: str) -> Tuple[List[Dict[str, float]], List[str]]:
         if len(reader.fieldnames) != len(set(reader.fieldnames)):
             raise ValueError("CSV column names must be unique")
 
-        criteria = [c for c in reader.fieldnames if c != "name"]
+        criteria = []
+        criterion_columns = []
+        for raw_criterion in reader.fieldnames:
+            if raw_criterion == "name":
+                continue
+            if not isinstance(raw_criterion, str) or not raw_criterion.strip():
+                raise ValueError("CSV criterion names must be non-empty")
+            criterion = raw_criterion.strip()
+            if criterion == "name":
+                raise ValueError("CSV criterion names cannot be 'name'")
+            if criterion in criteria:
+                raise ValueError("CSV column names must be unique")
+            criteria.append(criterion)
+            criterion_columns.append((raw_criterion, criterion))
 
         for row_number, row in enumerate(reader, 2):
             option = {"name": row.get("name", "")}
-            for criterion in criteria:
-                raw_value = row.get(criterion)
+            for raw_criterion, criterion in criterion_columns:
+                raw_value = row.get(raw_criterion)
                 if raw_value is None or not raw_value.strip():
                     raise ValueError(f"CSV row {row_number} criterion '{criterion}' is empty")
                 try:
@@ -154,9 +173,16 @@ def load_json(path: str) -> Tuple[List[Dict[str, float]], List[str]]:
         normalized = {}
         if "name" in option:
             normalized["name"] = option["name"]
-        for criterion, value in option.items():
-            if criterion == "name":
+        for raw_criterion, value in option.items():
+            if raw_criterion == "name":
                 continue
+            if not isinstance(raw_criterion, str) or not raw_criterion.strip():
+                raise ValueError(f"JSON option {index} criterion names must be non-empty")
+            criterion = raw_criterion.strip()
+            if criterion == "name":
+                raise ValueError(f"JSON option {index} criterion name is reserved")
+            if criterion in normalized:
+                raise ValueError(f"JSON option {index} criterion names must be unique")
             if criterion not in criteria:
                 criteria.append(criterion)
             normalized[criterion] = _validate_score(
@@ -176,7 +202,7 @@ def format_results(ranked: List[Tuple[str, float, Dict[str, float]]]) -> str:
     lines.append("-" * 60)
 
     for rank, (name, score, _) in enumerate(ranked, 1):
-        lines.append(f"{rank:<6} {name:<20} {score:>10.4f}")
+        lines.append(f"{rank:<6} {_display_text(name):<20} {score:>10.4f}")
 
     lines.append("-" * 60)
     return "\n".join(lines)
@@ -194,17 +220,31 @@ def format_detailed_results(
     norm_weights = normalize_weights(weights)
 
     for rank, (name, score, scores) in enumerate(ranked, 1):
-        lines.append(f"{rank}. {name} (score: {score:.4f})")
+        lines.append(f"{rank}. {_display_text(name)} (score: {score:.4f})")
 
         for criterion in sorted(scores.keys()):
             criterion_score = scores[criterion]
             weight = norm_weights.get(criterion, 0)
             contribution = criterion_score * weight
-            lines.append(f"   {criterion:20} {criterion_score:6.2f} * {weight:6.4f} = {contribution:6.4f}")
+            lines.append(f"   {_display_text(criterion):20} {criterion_score:6.2f} * {weight:6.4f} = {contribution:6.4f}")
 
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _display_text(value: Any) -> str:
+    """Escape terminal control characters before inserting user data in text output."""
+    escaped = []
+    for character in str(value):
+        codepoint = ord(character)
+        if codepoint < 0x20 or codepoint == 0x7F:
+            escaped.append(f"\\x{codepoint:02x}")
+        elif 0x80 <= codepoint <= 0x9F:
+            escaped.append(f"\\u{codepoint:04x}")
+        else:
+            escaped.append(character)
+    return "".join(escaped)
 
 
 def parse_weights(weights_str: str) -> Dict[str, float]:
