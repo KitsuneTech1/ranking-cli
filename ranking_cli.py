@@ -7,16 +7,47 @@ Deterministic, no model calls, weights are human-readable.
 import argparse
 import csv
 import json
+import math
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 __version__ = "0.1.0"
 
 
+def _validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
+    if not weights:
+        raise ValueError("At least one weight is required")
+
+    clean = {}
+    for criterion, weight in weights.items():
+        if not isinstance(criterion, str) or not criterion.strip():
+            raise ValueError("Weight criteria must be non-empty names")
+        if isinstance(weight, bool):
+            raise ValueError(f"Weight must be a finite non-negative number: {weight}")
+        try:
+            numeric_weight = float(weight)
+        except (TypeError, ValueError):
+            raise ValueError(f"Weight must be a number: {weight}")
+        if not math.isfinite(numeric_weight) or numeric_weight < 0:
+            raise ValueError(f"Weight must be a finite non-negative number: {weight}")
+        clean[criterion.strip()] = numeric_weight
+    return clean
+
+
+def _validate_score(value: Any, context: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{context} must be a number between 0 and 1")
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value) or not 0 <= numeric_value <= 1:
+        raise ValueError(f"{context} must be a number between 0 and 1")
+    return numeric_value
+
+
 def normalize_weights(weights: Dict[str, float]) -> Dict[str, float]:
     """Normalize weights so they sum to 1.0."""
+    weights = _validate_weights(weights)
     total = sum(weights.values())
     if total == 0:
         return {k: 1.0 / len(weights) for k in weights}
@@ -28,12 +59,13 @@ def score_option(option: Dict[str, float], weights: Dict[str, float]) -> float:
     Calculate weighted score for an option.
     Each criterion should be a value between 0 and 1.
     """
+    weights = _validate_weights(weights)
     score = 0.0
     weight_sum = 0.0
 
     for criterion, weight in weights.items():
         if criterion in option:
-            score += option[criterion] * weight
+            score += _validate_score(option[criterion], f"Criterion '{criterion}'") * weight
             weight_sum += weight
 
     if weight_sum == 0:
@@ -54,8 +86,10 @@ def rank_options(
     normalized_weights = normalize_weights(weights)
 
     ranked = []
-    for option in options:
-        name = option.get("name", str(options.index(option)))
+    for index, option in enumerate(options):
+        name = option.get("name")
+        if name is None or name == "":
+            name = str(index)
         score = score_option(option, normalized_weights)
         criterion_scores = {k: option.get(k, 0) for k in weights}
         ranked.append((name, score, criterion_scores))
@@ -69,20 +103,32 @@ def load_csv(path: str) -> Tuple[List[Dict[str, float]], List[str]]:
     rows = []
     criteria = []
 
-    with open(path, "r", newline="") as f:
+    with open(path, "r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
-        if reader.fieldnames is None:
+        if not reader.fieldnames:
             raise ValueError("CSV file is empty")
+        if "name" not in reader.fieldnames:
+            raise ValueError("CSV must contain a 'name' column")
+        if len(reader.fieldnames) != len(set(reader.fieldnames)):
+            raise ValueError("CSV column names must be unique")
 
         criteria = [c for c in reader.fieldnames if c != "name"]
 
-        for row in reader:
+        for row_number, row in enumerate(reader, 2):
             option = {"name": row.get("name", "")}
             for criterion in criteria:
+                raw_value = row.get(criterion)
+                if raw_value is None or not raw_value.strip():
+                    raise ValueError(f"CSV row {row_number} criterion '{criterion}' is empty")
                 try:
-                    option[criterion] = float(row.get(criterion, 0))
+                    numeric_value = float(raw_value.strip())
                 except ValueError:
-                    option[criterion] = 0.0
+                    raise ValueError(
+                        f"CSV row {row_number} criterion '{criterion}' must be a number between 0 and 1"
+                    )
+                option[criterion] = _validate_score(
+                    numeric_value, f"CSV row {row_number} criterion '{criterion}'"
+                )
             rows.append(option)
 
     return rows, criteria
@@ -90,7 +136,7 @@ def load_csv(path: str) -> Tuple[List[Dict[str, float]], List[str]]:
 
 def load_json(path: str) -> Tuple[List[Dict[str, float]], List[str]]:
     """Load options and criteria from JSON file."""
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         data = json.load(f)
 
     if not isinstance(data, dict) or "options" not in data:
@@ -100,12 +146,25 @@ def load_json(path: str) -> Tuple[List[Dict[str, float]], List[str]]:
     if not isinstance(options, list):
         raise ValueError("'options' must be a list")
 
-    # Discover criteria from first option
     criteria = []
-    if options:
-        criteria = [k for k in options[0].keys() if k != "name"]
+    normalized_options = []
+    for index, option in enumerate(options):
+        if not isinstance(option, dict):
+            raise ValueError(f"Option {index} must be an object")
+        normalized = {}
+        if "name" in option:
+            normalized["name"] = option["name"]
+        for criterion, value in option.items():
+            if criterion == "name":
+                continue
+            if criterion not in criteria:
+                criteria.append(criterion)
+            normalized[criterion] = _validate_score(
+                value, f"JSON option {index} criterion '{criterion}'"
+            )
+        normalized_options.append(normalized)
 
-    return options, criteria
+    return normalized_options, criteria
 
 
 def format_results(ranked: List[Tuple[str, float, Dict[str, float]]]) -> str:
@@ -150,15 +209,26 @@ def format_detailed_results(
 
 def parse_weights(weights_str: str) -> Dict[str, float]:
     """Parse weights from comma-separated string like 'a:2,b:3,c:1'."""
+    if not weights_str or not weights_str.strip():
+        raise ValueError("At least one weight is required")
+
     weights = {}
     for pair in weights_str.split(","):
+        if not pair.strip():
+            raise ValueError("Weight entries cannot be empty")
         if ":" not in pair:
             raise ValueError(f"Invalid weight format: {pair}. Use 'criterion:weight'")
         criterion, weight = pair.split(":", 1)
+        criterion = criterion.strip()
+        if not criterion:
+            raise ValueError("Weight criterion cannot be empty")
+        if criterion in weights:
+            raise ValueError(f"Duplicate weight criterion: {criterion}")
         try:
-            weights[criterion.strip()] = float(weight.strip())
+            numeric_weight = float(weight.strip())
         except ValueError:
             raise ValueError(f"Weight must be a number: {weight}")
+        weights[criterion] = _validate_weights({criterion: numeric_weight})[criterion]
     return weights
 
 

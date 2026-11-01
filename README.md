@@ -1,6 +1,6 @@
 # ranking-cli
 
-ranking-cli ranks options on several weighted criteria from a CSV or JSON file. It is deterministic, requires no model calls, and all weights are human-readable and auditable.
+ranking-cli ranks options on several weighted criteria from a CSV or JSON file. It is deterministic, uses no model calls, and keeps the scoring inputs human-readable.
 
 Use it to score and rank anything: candidates, tools, features, vendors, or decisions.
 
@@ -12,6 +12,7 @@ Use it to score and rank anything: candidates, tools, features, vendors, or deci
 - Deterministic, no randomness or models
 - Human-readable results and detailed breakdowns
 - Output as simple table, detailed breakdown, or JSON
+- A small standalone pairwise AHP helper in `ahp.py`
 
 ## Requirements
 
@@ -27,7 +28,7 @@ cd ranking-cli
 
 ## CSV Format
 
-Create a CSV file with options as rows and criteria as columns:
+Create a CSV file with a `name` column, options as rows, and criteria as columns:
 
 ```csv
 name,speed,cost,reliability
@@ -36,7 +37,7 @@ Option B,0.7,0.8,0.9
 Option C,0.8,0.6,0.7
 ```
 
-Criteria values should be between 0 and 1.
+Every criterion value must be a finite number from 0 to 1. Invalid or missing CSV values are reported as errors.
 
 ## JSON Format
 
@@ -50,6 +51,8 @@ Or use JSON with a similar structure:
   ]
 }
 ```
+
+The JSON file must contain an `options` list. Each option must be an object, and every criterion value must be a finite number from 0 to 1. Criteria may appear in different options. An option without a `name` uses its zero-based row index in results.
 
 ## CLI Usage
 
@@ -65,6 +68,8 @@ Options:
 - `--format`: Output format: simple, detailed, or json (default: simple)
 - `--ascending`: Sort ascending instead of descending
 
+Weights must be non-negative numbers with unique criterion names. At least one weight is required. If all weights are zero, criteria are weighted equally. An option missing a weighted criterion is scored using the criteria it does provide, so the remaining weights are renormalized.
+
 ## Python API
 
 Use it as a library:
@@ -77,6 +82,22 @@ weights = {"speed": 3, "cost": 1, "reliability": 2}
 ranked = rank_options(options, weights)
 print(format_results(ranked))
 ```
+
+## Pairwise AHP API
+
+`ahp.py` provides a standalone pairwise Analytic Hierarchy Process helper. It is under 300 lines and uses no service or third-party dependency. Give it a square reciprocal matrix of criterion comparisons, then pass the resulting criteria to the weighted-sum ranker:
+
+```python
+from ahp import rank_with_ahp
+
+ranked, consistency_ratio = rank_with_ahp(
+    options,
+    ["speed", "cost"],
+    [[1, 3], [1 / 3, 1]],
+)
+```
+
+The function returns the ranking and the AHP consistency ratio. A ratio near zero is ideal. The command-line interface remains focused on CSV or JSON weighted-sum ranking.
 
 ## Example
 
