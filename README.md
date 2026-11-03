@@ -4,6 +4,7 @@
 
 Deterministic weighted-criteria ranking from CSV or JSON, with human-readable and auditable scores.
 
+[![Build Status](https://github.com/KitsuneTech1/ranking-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/KitsuneTech1/ranking-cli/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
@@ -26,6 +27,17 @@ python ranking_cli.py options.csv --weights "speed:3,cost:1,reliability:2"
 ```
 
 See the CSV format example below.
+
+
+## Architecture & Data Flow
+
+```mermaid
+flowchart TD
+    A[Input: CSV / JSON Candidate Options & Criteria] --> B[Pairwise Comparison Matrix]
+    B --> C[Analytic Hierarchy Process AHP Solver]
+    C --> D[Consistency Ratio CR Validation]
+    D --> E[Deterministic Priority Ranking Output]
+```
 
 ## Features
 
